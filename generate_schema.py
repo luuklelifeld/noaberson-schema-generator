@@ -9,7 +9,7 @@ TEAMS = [
     ("Team 5", "adult"),
     ("Team 6", "adult"),
     ("Team 7", "non-adult"),
-    ("Team 8", "adult"),
+    ("Team 8", "non-adult"),
     ("Team 9", "non-adult"),
     ("Team 10", "adult"),
     ("Team 11", "non-adult"),
@@ -20,7 +20,7 @@ TEAMS = [
     ("Team 16", "adult"),
     ("Team 17", "non-adult"),
     ("Team 18", "adult"),
-    ("Team 19", "adult"),
+    ("Team 19", "non-adult"),
     ("Team 20", "non-adult"),
     ("Team 21", "adult"),
     ("Team 22", "adult"),
@@ -38,10 +38,10 @@ TEAMS = [
     ("Team 34", "non-adult"),
     ("Team 35", "adult"),
     ("Team 36", "adult"),
-    ("Team 37", "non-adult"),
-    ("Team 38", "adult"),
-    ("Team 39", "adult"),
-    ("Team 40", "non-adult"),
+    #("Team 37", "non-adult"),
+    #("Team 38", "adult"),
+    #("Team 39", "adult"),
+    #("Team 40", "non-adult"),
 ]
 TEAMS_PER_GAME = 4
 SEED = 42
@@ -49,7 +49,7 @@ SEED = 42
 ADULT = "adult"
 NON_ADULT = "non-adult"
 
-games_seen_history = {game: {team: False for team, _ in TEAMS} for game in GAMES}
+games_seen_history = {game: {team: False for team in TEAMS} for game in GAMES}
 rng = random.Random(SEED)
 
 def build_schedule():
@@ -62,33 +62,59 @@ def build_schedule():
     for round in range(num_rounds):
         round_row = []
         for game in GAMES:
-            team_one = pick_team(game);
-            team_two = pick_team(game);
-            team_three = pick_team(game);
-            team_four = pick_team(game);
-
-            round_row.append([team_one, team_two, team_three, team_four])
+            round_row.append(pick_teams(game))
         rounds.append(round_row)
 
     return rounds
 
-def pick_team(game_name):
-    random_team = rng.choice(TEAMS);
-    if (games_seen_history[game_name][random_team[0]] == False):
-        random_team = rng.choice(TEAMS);
+def pick_teams(game_name):
+    available_teams = [team for team in games_seen_history[game_name].keys() if games_seen_history[game_name][team] == False]
 
-    games_seen_history[game_name][random_team[0]] = True
-    return random_team;
+    random_team_one = rng.choice(available_teams);
+    available_teams.remove(random_team_one);
+    games_seen_history[game_name][random_team_one] = True
+
+    team_age = random_team_one[1]
+    available_teams_same_age = [team for team in available_teams if team[1] == team_age]
+
+    if len(available_teams_same_age) == 3:
+        games_seen_history[game_name][available_teams_same_age[0]] = True
+        games_seen_history[game_name][available_teams_same_age[1]] = True
+        games_seen_history[game_name][available_teams_same_age[2]] = True
+        return [random_team_one, available_teams_same_age[0], available_teams_same_age[1], available_teams_same_age[2]]
+
+
+    if len(available_teams_same_age) > 3:
+        random_team_two = rng.choice(available_teams_same_age)
+        available_teams_same_age.remove(random_team_two)
+        random_team_three = rng.choice(available_teams_same_age)
+        available_teams_same_age.remove(random_team_three)
+        random_team_four = rng.choice(available_teams_same_age)
+        available_teams_same_age.remove(random_team_four)
+        games_seen_history[game_name][random_team_two] = True
+        games_seen_history[game_name][random_team_three] = True
+        games_seen_history[game_name][random_team_four] = True
+        return [random_team_one, random_team_two, random_team_three, random_team_four]
+
+    random_team_two = rng.choice(available_teams)
+    available_teams.remove(random_team_two)
+    random_team_three = rng.choice(available_teams)
+    available_teams.remove(random_team_three)
+    random_team_four = rng.choice(available_teams)
+    available_teams.remove(random_team_four)
+    games_seen_history[game_name][random_team_two] = True
+    games_seen_history[game_name][random_team_three] = True
+    games_seen_history[game_name][random_team_four] = True
+    return [random_team_one, random_team_two, random_team_three, random_team_four]
+
 
 def format_team(team):
-    print(team)
     name, _ = team
     return name.replace("Team ", "T")
 
 
 def cell_kind(teams):
     kinds = {kind for _, kind in teams}
-    print(kinds)
     if len(kinds) == 1:
         return next(iter(kinds))
     return "mixed"
@@ -111,7 +137,6 @@ def render_schedule(rounds, output_path="schema.png"):
     row_data = []
     cell_colors = []
     for i, round_row in enumerate(rounds, 1):
-        print(round_row)
         row = [f"Round {i}"] + [", ".join(format_team(t) for t in teams) for teams in round_row]
         colors = ["#f0f0f0"] + [KIND_COLORS[cell_kind(teams)] for teams in round_row]
         row_data.append(row)
