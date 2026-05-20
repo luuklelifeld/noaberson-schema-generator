@@ -49,58 +49,102 @@ ADULT = "adult"
 NON_ADULT = "non-adult"
 
 
-def build_schedule(rng):
-    history = {game: {team: False for team in TEAMS} for game in GAMES}
-    num_games = len(GAMES)
+PER_ROUND_TRIES = 50
+MAX_OUTER_ATTEMPTS = 50
 
+
+def build_schedule(rng):
+    num_games = len(GAMES)
     slots_per_round = num_games * TEAMS_PER_GAME
     num_rounds = max(1, len(TEAMS) * num_games // slots_per_round)
+    teams_pool = list(TEAMS)
 
-    rounds = []
-    for _ in range(num_rounds):
-        teams_picked_this_round = []
-        round_row = []
-        for game in GAMES:
-            picked_teams = pick_teams(game, history, teams_picked_this_round, rng)
-            if picked_teams:
-                teams_picked_this_round.extend(picked_teams);
-                round_row.append(picked_teams)
-            else:
-                round_row.append([('fake', 'adult'), ('fake', 'adult'), ('fake', 'adult'), ('fake', 'adult')])
-        rounds.append(round_row)
+    for _ in range(MAX_OUTER_ATTEMPTS):
+        rng.shuffle(teams_pool)
+        sit_outs = [set(teams_pool[i * 4:(i + 1) * 4]) for i in range(num_rounds)]
 
-    return rounds
+        history = {game: {team: False for team in TEAMS} for game in GAMES}
+        rounds = []
+        ok = True
+        for r in range(num_rounds):
+            playing = [t for t in TEAMS if t not in sit_outs[r]]
+            best = None
+            best_mixed = num_games + 1
+            for _ in range(PER_ROUND_TRIES):
+                m = _match_round(history, playing, num_games, rng)
+                if m is None:
+                    continue
+                mixed = _count_mixed(m)
+                if mixed < best_mixed:
+                    best = m
+                    best_mixed = mixed
+                    if mixed == 0:
+                        break
+            if best is None:
+                ok = False
+                break
+            rounds.append([list(best[gi]) for gi in range(num_games)])
+            for gi, teams in best.items():
+                for t in teams:
+                    history[GAMES[gi]][t] = True
+        if ok:
+            return rounds
+    return None
 
-def pick_teams(game_name, history, teams_picked_this_round, rng):
-    available_teams = [team for team in history[game_name].keys() if history[game_name][team] == False]
-    available_teams = [team for team in available_teams if team not in teams_picked_this_round]
 
-    try:
-        first_team = rng.choice(available_teams);
-    except:
-        return
-    available_teams.remove(first_team)
-    history[game_name][first_team] = True
+def _count_mixed(game_teams):
+    return sum(1 for ts in game_teams.values() if len({t[1] for t in ts}) > 1)
 
-    team_age = first_team[1]
-    available_teams_same_age = [team for team in available_teams if team[1] == team_age]
 
-    # Pick from the same age group if enough same-age-group teams are available to fill the game
-    if (len(available_teams_same_age) >= 3):
-        available_teams = available_teams_same_age
+def _match_round(history, playing_teams, num_games, rng):
+    game_teams = {gi: [] for gi in range(num_games)}
+    team_game = {}
+    eligible = {t: [gi for gi in range(num_games) if not history[GAMES[gi]][t]] for t in playing_teams}
 
-    picked_teams = [first_team]
+    def priority_key(team, gi):
+        contents = game_teams[gi]
+        if not contents:
+            return 1
+        kinds = {t[1] for t in contents}
+        if len(kinds) == 1:
+            return 0 if team[1] in kinds else 3
+        return 2
 
-    for _ in range(3):
-        try:
-            picked_team = rng.choice(available_teams)
-            available_teams.remove(picked_team)
-            history[game_name][picked_team] = True
-            picked_teams.append(picked_team)
-        except:
-            pass
+    def augment(team, visited, depth=0):
+        if depth > 30:
+            return False
+        cands = sorted(eligible[team], key=lambda gi: (priority_key(team, gi), rng.random()))
+        for gi in cands:
+            if gi in visited:
+                continue
+            visited.add(gi)
+            if len(game_teams[gi]) < TEAMS_PER_GAME:
+                game_teams[gi].append(team)
+                team_game[team] = gi
+                return True
+            others = list(game_teams[gi])
+            rng.shuffle(others)
+            for other in others:
+                game_teams[gi].remove(other)
+                del team_game[other]
+                if augment(other, visited, depth + 1):
+                    game_teams[gi].append(team)
+                    team_game[team] = gi
+                    return True
+                game_teams[gi].append(other)
+                team_game[other] = gi
+        return False
 
-    return picked_teams
+    adults = [t for t in playing_teams if t[1] == ADULT]
+    non_adults = [t for t in playing_teams if t[1] == NON_ADULT]
+    rng.shuffle(adults)
+    rng.shuffle(non_adults)
+    for t in adults + non_adults:
+        if not augment(t, set()):
+            return None
+    if any(len(game_teams[gi]) != TEAMS_PER_GAME for gi in range(num_games)):
+        return None
+    return game_teams
 
 
 def format_team(team):
@@ -173,6 +217,9 @@ def render_schedule(rounds, output_path="schema.png"):
 if __name__ == "__main__":
     for i in range(9999999):
         rng = random.Random(i)
-        path = render_schedule(build_schedule(rng), f"schema-{i}.png")
+        schedule = build_schedule(rng)
+        if schedule is None:
+            continue
+        path = render_schedule(schedule, f"schema-{i}.png")
         if path != "skipped":
             print(f"Wrote {path}")
