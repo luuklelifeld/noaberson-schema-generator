@@ -40,16 +40,21 @@ TEAMS = [
     ("Team 34", "non-adult"),
     ("Team 35", "adult"),
     ("Team 36", "adult"),
-    #("Team 37", "non-adult"),
-    #("Team 38", "adult"),
-    #("Team 39", "adult"),
-    #("Team 40", "non-adult"),
 ]
 TEAMS_PER_GAME = 4
 
 ADULT = "adult"
 NON_ADULT = "non-adult"
+MIXED = "mixed"
 
+KIND_COLORS = {
+    ADULT: "#cfe6ff",
+    NON_ADULT: "#ffe0b3",
+    MIXED: "#ff0000",
+}
+LABEL_COLOR = "#d9d9d9"
+ROW_HEADER_COLOR = "#f0f0f0"
+GRID_EDGE_COLOR = "#888"
 
 SOLVER_TIME_LIMIT_SECONDS = 30.0
 
@@ -60,8 +65,8 @@ class _StopAtObjective(cp_model.CpSolverSolutionCallback):
         self._target = target
 
     def on_solution_callback(self):
-        if self.ObjectiveValue() <= self._target:
-            self.StopSearch()
+        if self.objective_value <= self._target:
+            self.stop_search()
 
 
 def build_schedule(rng):
@@ -69,55 +74,49 @@ def build_schedule(rng):
     slots_per_round = num_games * TEAMS_PER_GAME
     num_rounds = max(1, len(TEAMS) * num_games // slots_per_round)
     num_teams = len(TEAMS)
-    adult_team = [TEAMS[t][1] == ADULT for t in range(num_teams)]
+    adult_indices = [t for t in range(num_teams) if TEAMS[t][1] == ADULT]
 
     model = cp_model.CpModel()
 
-    x = [[[model.NewBoolVar(f"x_{t}_{r}_{g}")
+    x = [[[model.new_bool_var(f"x_{t}_{r}_{g}")
            for g in range(num_games)]
           for r in range(num_rounds)]
          for t in range(num_teams)]
 
     for t in range(num_teams):
         for g in range(num_games):
-            model.Add(sum(x[t][r][g] for r in range(num_rounds)) == 1)
+            model.add(sum(x[t][r][g] for r in range(num_rounds)) == 1)
         for r in range(num_rounds):
-            model.Add(sum(x[t][r][g] for g in range(num_games)) <= 1)
+            model.add(sum(x[t][r][g] for g in range(num_games)) <= 1)
 
     for r in range(num_rounds):
         for g in range(num_games):
-            model.Add(sum(x[t][r][g] for t in range(num_teams)) == TEAMS_PER_GAME)
+            model.add(sum(x[t][r][g] for t in range(num_teams)) == TEAMS_PER_GAME)
 
-    mixed = [[model.NewBoolVar(f"mixed_{r}_{g}")
+    mixed = [[model.new_bool_var(f"mixed_{r}_{g}")
               for g in range(num_games)]
              for r in range(num_rounds)]
+    mixed_table = [(k, 1 if 0 < k < TEAMS_PER_GAME else 0) for k in range(TEAMS_PER_GAME + 1)]
     for r in range(num_rounds):
         for g in range(num_games):
-            adult_count = sum(x[t][r][g] for t in range(num_teams) if adult_team[t])
-            has_adult = model.NewBoolVar(f"ha_{r}_{g}")
-            has_non = model.NewBoolVar(f"hn_{r}_{g}")
-            model.Add(adult_count >= 1).OnlyEnforceIf(has_adult)
-            model.Add(adult_count == 0).OnlyEnforceIf(has_adult.Not())
-            model.Add(adult_count <= TEAMS_PER_GAME - 1).OnlyEnforceIf(has_non)
-            model.Add(adult_count == TEAMS_PER_GAME).OnlyEnforceIf(has_non.Not())
-            model.AddBoolAnd([has_adult, has_non]).OnlyEnforceIf(mixed[r][g])
-            model.AddBoolOr([has_adult.Not(), has_non.Not()]).OnlyEnforceIf(mixed[r][g].Not())
+            adult_count = model.new_int_var(0, TEAMS_PER_GAME, f"adult_count_{r}_{g}")
+            model.add(adult_count == sum(x[t][r][g] for t in adult_indices))
+            model.add_allowed_assignments([adult_count, mixed[r][g]], mixed_table)
 
-    model.Minimize(sum(mixed[r][g] for r in range(num_rounds) for g in range(num_games)))
+    model.minimize(sum(mixed[r][g] for r in range(num_rounds) for g in range(num_games)))
 
-    num_adults = sum(1 for is_adult in adult_team if is_adult)
-    target = num_games if num_adults % TEAMS_PER_GAME != 0 else 0
+    target = num_games if len(adult_indices) % TEAMS_PER_GAME != 0 else 0
 
     solver = cp_model.CpSolver()
     solver.parameters.random_seed = rng.randrange(2**31)
     solver.parameters.max_time_in_seconds = SOLVER_TIME_LIMIT_SECONDS
-    status = solver.Solve(model, _StopAtObjective(target))
+    status = solver.solve(model, _StopAtObjective(target))
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return None
 
     rounds = [
         [
-            [TEAMS[t] for t in range(num_teams) if solver.Value(x[t][r][g])]
+            [TEAMS[t] for t in range(num_teams) if solver.value(x[t][r][g])]
             for g in range(num_games)
         ]
         for r in range(num_rounds)
@@ -156,14 +155,7 @@ def cell_kind(teams):
     kinds = {kind for _, kind in teams}
     if len(kinds) == 1:
         return next(iter(kinds))
-    return "mixed"
-
-
-KIND_COLORS = {
-    ADULT: "#cfe6ff",
-    NON_ADULT: "#ffe0b3",
-    "mixed": "#ff0000",
-}
+    return MIXED
 
 
 def render_schedule(rounds, output_path="schema.png"):
@@ -172,17 +164,12 @@ def render_schedule(rounds, output_path="schema.png"):
     num_games = len(GAMES)
     num_rounds = len(rounds)
 
-    for round in rounds:
-        for game in round:
-            if len(game) != 4:
-                return "skipped"
-
     col_labels = [""] + GAMES
     row_data = []
     cell_colors = []
     for i, round_row in enumerate(rounds, 1):
         row = [f"Round {i}"] + [", ".join(format_team(t) for t in teams) for teams in round_row]
-        colors = ["#f0f0f0"] + [KIND_COLORS[cell_kind(teams)] for teams in round_row]
+        colors = [ROW_HEADER_COLOR] + [KIND_COLORS[cell_kind(teams)] for teams in round_row]
         row_data.append(row)
         cell_colors.append(colors)
 
@@ -195,7 +182,7 @@ def render_schedule(rounds, output_path="schema.png"):
         cellText=row_data,
         colLabels=col_labels,
         cellColours=cell_colors,
-        colColours=["#d9d9d9"] * (num_games + 1),
+        colColours=[LABEL_COLOR] * (num_games + 1),
         cellLoc="center",
         loc="center",
     )
@@ -204,7 +191,7 @@ def render_schedule(rounds, output_path="schema.png"):
     table.scale(1, 1.8)
 
     for (r, c), cell in table.get_celld().items():
-        cell.set_edgecolor("#888")
+        cell.set_edgecolor(GRID_EDGE_COLOR)
         if r == 0 or c == 0:
             cell.set_text_props(weight="bold")
 
@@ -221,5 +208,4 @@ if __name__ == "__main__":
         if schedule is None:
             continue
         path = render_schedule(schedule, f"schema-{i}.png")
-        if path != "skipped":
-            print(f"Wrote {path}")
+        print(f"Wrote {path}")
