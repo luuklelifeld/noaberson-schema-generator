@@ -81,7 +81,30 @@ def build_schedule(rng):
             if best_mixed <= 8:
                 break
 
+    if best_rounds is not None:
+        _validate_schedule(best_rounds)
     return best_rounds
+
+
+def _validate_schedule(rounds):
+    num_games = len(GAMES)
+    teams_set = set(TEAMS)
+
+    for r_idx, rnd in enumerate(rounds):
+        assert len(rnd) == num_games, f"round {r_idx} has {len(rnd)} games, expected {num_games}"
+        seen_in_round = set()
+        for g_idx, cell in enumerate(rnd):
+            assert len(cell) == TEAMS_PER_GAME, f"round {r_idx} game {g_idx} has {len(cell)} teams"
+            for t in cell:
+                assert t not in seen_in_round, f"round {r_idx} contains duplicate team {t}"
+                seen_in_round.add(t)
+
+    for g_idx, game_name in enumerate(GAMES):
+        teams_in_column = [t for rnd in rounds for t in rnd[g_idx]]
+        assert len(teams_in_column) == len(teams_set), \
+            f"{game_name} has {len(teams_in_column)} entries, expected {len(teams_set)}"
+        assert set(teams_in_column) == teams_set, \
+            f"{game_name} missing teams {teams_set - set(teams_in_column)} or duplicates {[t for t in teams_in_column if teams_in_column.count(t) > 1]}"
 
 
 def _build_initial(rng, num_rounds, num_games):
