@@ -44,68 +44,63 @@ TEAMS = [
     #("Team 40", "non-adult"),
 ]
 TEAMS_PER_GAME = 4
-SEED = 42
 
 ADULT = "adult"
 NON_ADULT = "non-adult"
 
-games_seen_history = {game: {team: False for team in TEAMS} for game in GAMES}
-rng = random.Random(SEED)
 
-def build_schedule():
+def build_schedule(rng):
+    history = {game: {team: False for team in TEAMS} for game in GAMES}
     num_games = len(GAMES)
 
     slots_per_round = num_games * TEAMS_PER_GAME
     num_rounds = max(1, len(TEAMS) * num_games // slots_per_round)
 
     rounds = []
-    for round in range(num_rounds):
+    for _ in range(num_rounds):
+        teams_picked_this_round = []
         round_row = []
         for game in GAMES:
-            round_row.append(pick_teams(game))
+            picked_teams = pick_teams(game, history, teams_picked_this_round, rng)
+            if picked_teams:
+                teams_picked_this_round.extend(picked_teams);
+                round_row.append(picked_teams)
+            else:
+                round_row.append([('fake', 'adult'), ('fake', 'adult'), ('fake', 'adult'), ('fake', 'adult')])
         rounds.append(round_row)
 
     return rounds
 
-def pick_teams(game_name):
-    available_teams = [team for team in games_seen_history[game_name].keys() if games_seen_history[game_name][team] == False]
+def pick_teams(game_name, history, teams_picked_this_round, rng):
+    available_teams = [team for team in history[game_name].keys() if history[game_name][team] == False]
+    available_teams = [team for team in available_teams if team not in teams_picked_this_round]
 
-    random_team_one = rng.choice(available_teams);
-    available_teams.remove(random_team_one);
-    games_seen_history[game_name][random_team_one] = True
+    try:
+        first_team = rng.choice(available_teams);
+    except:
+        return
+    available_teams.remove(first_team)
+    history[game_name][first_team] = True
 
-    team_age = random_team_one[1]
+    team_age = first_team[1]
     available_teams_same_age = [team for team in available_teams if team[1] == team_age]
 
-    if len(available_teams_same_age) == 3:
-        games_seen_history[game_name][available_teams_same_age[0]] = True
-        games_seen_history[game_name][available_teams_same_age[1]] = True
-        games_seen_history[game_name][available_teams_same_age[2]] = True
-        return [random_team_one, available_teams_same_age[0], available_teams_same_age[1], available_teams_same_age[2]]
+    # Pick from the same age group if enough same-age-group teams are available to fill the game
+    if (len(available_teams_same_age) >= 3):
+        available_teams = available_teams_same_age
 
+    picked_teams = [first_team]
 
-    if len(available_teams_same_age) > 3:
-        random_team_two = rng.choice(available_teams_same_age)
-        available_teams_same_age.remove(random_team_two)
-        random_team_three = rng.choice(available_teams_same_age)
-        available_teams_same_age.remove(random_team_three)
-        random_team_four = rng.choice(available_teams_same_age)
-        available_teams_same_age.remove(random_team_four)
-        games_seen_history[game_name][random_team_two] = True
-        games_seen_history[game_name][random_team_three] = True
-        games_seen_history[game_name][random_team_four] = True
-        return [random_team_one, random_team_two, random_team_three, random_team_four]
+    for _ in range(3):
+        try:
+            picked_team = rng.choice(available_teams)
+            available_teams.remove(picked_team)
+            history[game_name][picked_team] = True
+            picked_teams.append(picked_team)
+        except:
+            pass
 
-    random_team_two = rng.choice(available_teams)
-    available_teams.remove(random_team_two)
-    random_team_three = rng.choice(available_teams)
-    available_teams.remove(random_team_three)
-    random_team_four = rng.choice(available_teams)
-    available_teams.remove(random_team_four)
-    games_seen_history[game_name][random_team_two] = True
-    games_seen_history[game_name][random_team_three] = True
-    games_seen_history[game_name][random_team_four] = True
-    return [random_team_one, random_team_two, random_team_three, random_team_four]
+    return picked_teams
 
 
 def format_team(team):
@@ -132,6 +127,11 @@ def render_schedule(rounds, output_path="schema.png"):
 
     num_games = len(GAMES)
     num_rounds = len(rounds)
+
+    for round in rounds:
+        for game in round:
+            if len(game) != 4:
+                return "skipped"
 
     col_labels = [""] + GAMES
     row_data = []
@@ -171,5 +171,8 @@ def render_schedule(rounds, output_path="schema.png"):
 
 
 if __name__ == "__main__":
-    path = render_schedule(build_schedule())
-    print(f"Wrote {path}")
+    for i in range(9999999):
+        rng = random.Random(i)
+        path = render_schedule(build_schedule(rng), f"schema-{i}.png")
+        if path != "skipped":
+            print(f"Wrote {path}")
