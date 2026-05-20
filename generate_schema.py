@@ -1,3 +1,5 @@
+import random
+
 GAMES = [f"Game {i}" for i in range(1, 9)]
 TEAMS = [
     ("Team 1", "adult"),
@@ -47,92 +49,46 @@ SEED = 42
 ADULT = "adult"
 NON_ADULT = "non-adult"
 
+games_seen_history = {game: {team: False for team, _ in TEAMS} for game in GAMES}
+rng = random.Random(SEED)
 
 def build_schedule():
-    import random
-
-    rng = random.Random(SEED)
-
     num_games = len(GAMES)
-    adults = [name for name, kind in TEAMS if kind == ADULT]
-    non_adults = [name for name, kind in TEAMS if kind == NON_ADULT]
 
     slots_per_round = num_games * TEAMS_PER_GAME
     num_rounds = max(1, len(TEAMS) * num_games // slots_per_round)
 
-    if adults and non_adults:
-        adult_games = round(len(adults) / len(TEAMS) * num_games)
-        adult_games = max(1, min(num_games - 1, adult_games))
-    elif adults:
-        adult_games = num_games
-    else:
-        adult_games = 0
-    non_adult_games = num_games - adult_games
-
-    adult_slots_per_round = adult_games * TEAMS_PER_GAME
-    non_adult_slots_per_round = non_adult_games * TEAMS_PER_GAME
-
-    adult_play_count = {t: 0 for t in adults}
-    non_adult_play_count = {t: 0 for t in non_adults}
-
     rounds = []
-    for r in range(num_rounds):
-        adult_lineup = pick_lineup(
-            adults, non_adults, adult_play_count, non_adult_play_count,
-            adult_slots_per_round, ADULT, rng,
-        )
-        non_adult_lineup = pick_lineup(
-            non_adults, adults, non_adult_play_count, adult_play_count,
-            non_adult_slots_per_round, NON_ADULT, rng,
-        )
-
+    for round in range(num_rounds):
         round_row = []
-        for g in range(adult_games):
-            start = g * TEAMS_PER_GAME
-            round_row.append(adult_lineup[start : start + TEAMS_PER_GAME])
-        for g in range(non_adult_games):
-            start = g * TEAMS_PER_GAME
-            round_row.append(non_adult_lineup[start : start + TEAMS_PER_GAME])
+        for game in GAMES:
+            team_one = pick_team(game);
+            team_two = pick_team(game);
+            team_three = pick_team(game);
+            team_four = pick_team(game);
+
+            round_row.append([team_one, team_two, team_three, team_four])
         rounds.append(round_row)
+
     return rounds
 
+def pick_team(game_name):
+    random_team = rng.choice(TEAMS);
+    if (games_seen_history[game_name][random_team[0]] == False):
+        random_team = rng.choice(TEAMS);
 
-def pick_lineup(primary, fallback, primary_counts, fallback_counts, slots, primary_kind, rng):
-    fallback_kind = NON_ADULT if primary_kind == ADULT else ADULT
-    lineup = []
-
-    if not primary:
-        chosen = sorted(fallback, key=lambda t: (fallback_counts[t], rng.random()))[:slots]
-        rng.shuffle(chosen)
-        for t in chosen:
-            lineup.append((t, fallback_kind))
-            fallback_counts[t] += 1
-        return lineup
-
-    take_primary = min(slots, len(primary))
-    primary_chosen = sorted(primary, key=lambda t: (primary_counts[t], rng.random()))[:take_primary]
-    for t in primary_chosen:
-        primary_counts[t] += 1
-
-    surplus = slots - take_primary
-    fallback_chosen = []
-    if surplus:
-        fallback_chosen = sorted(fallback, key=lambda t: (fallback_counts[t], rng.random()))[:surplus]
-        for t in fallback_chosen:
-            fallback_counts[t] += 1
-
-    tagged = [(t, primary_kind) for t in primary_chosen] + [(t, fallback_kind) for t in fallback_chosen]
-    rng.shuffle(tagged)
-    return tagged
-
+    games_seen_history[game_name][random_team[0]] = True
+    return random_team;
 
 def format_team(team):
+    print(team)
     name, _ = team
     return name.replace("Team ", "T")
 
 
 def cell_kind(teams):
     kinds = {kind for _, kind in teams}
+    print(kinds)
     if len(kinds) == 1:
         return next(iter(kinds))
     return "mixed"
@@ -141,7 +97,7 @@ def cell_kind(teams):
 KIND_COLORS = {
     ADULT: "#cfe6ff",
     NON_ADULT: "#ffe0b3",
-    "mixed": "#e6ccff",
+    "mixed": "#ff0000",
 }
 
 
@@ -155,6 +111,7 @@ def render_schedule(rounds, output_path="schema.png"):
     row_data = []
     cell_colors = []
     for i, round_row in enumerate(rounds, 1):
+        print(round_row)
         row = [f"Round {i}"] + [", ".join(format_team(t) for t in teams) for teams in round_row]
         colors = ["#f0f0f0"] + [KIND_COLORS[cell_kind(teams)] for teams in round_row]
         row_data.append(row)
