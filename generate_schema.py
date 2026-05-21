@@ -1,3 +1,4 @@
+import csv
 import random
 
 from ortools.sat.python import cp_model
@@ -40,6 +41,10 @@ TEAMS = [
     ("Team 34", "non-adult"),
     ("Team 35", "adult"),
     ("Team 36", "adult"),
+    ("Team 37", "adult"),
+    ("Team 38", "adult"),
+    ("Team 39", "adult"),
+    ("Team 40", "adult"),
 ]
 TEAMS_PER_GAME = 4
 
@@ -137,6 +142,8 @@ def _validate_schedule(rounds):
             for t in cell:
                 assert t not in seen_in_round, f"round {r_idx} contains duplicate team {t}"
                 seen_in_round.add(t)
+        missing = [team[0] for team in TEAMS if team not in seen_in_round]
+        print(f"round {r_idx + 1} does not contain teams: {missing}")
 
     for g_idx, game_name in enumerate(GAMES):
         teams_in_column = [t for rnd in rounds for t in rnd[g_idx]]
@@ -201,11 +208,21 @@ def render_schedule(rounds, output_path="schema.png"):
     return output_path
 
 
+def write_csv(rounds, output_path="schema.csv"):
+    with open(output_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([""] + GAMES)
+        for i, round_row in enumerate(rounds, 1):
+            writer.writerow([f"Round {i}"] + [", ".join(format_team(t) for t in teams) for teams in round_row])
+    return output_path
+
+
 if __name__ == "__main__":
-    for i in range(10):
+    for i in range(1):
         rng = random.Random(i)
         schedule = build_schedule(rng)
         if schedule is None:
             continue
-        path = render_schedule(schedule, f"schema-{i}.png")
-        print(f"Wrote {path}")
+        png_path = render_schedule(schedule, f"schema-{i}.png")
+        csv_path = write_csv(schedule, f"schema-{i}.csv")
+        print(f"Wrote {png_path} and {csv_path}")
