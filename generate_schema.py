@@ -59,13 +59,7 @@ TEAMS_PER_GAME = 4
 
 ADULT = "adult"
 NON_ADULT = "non-adult"
-MIXED = "mixed"
 
-KIND_COLORS = {
-    ADULT: "#cfe6ff",
-    NON_ADULT: "#ffe0b3",
-    MIXED: "#ff0000",
-}
 LABEL_COLOR = "#d9d9d9"
 ROW_HEADER_COLOR = "#f0f0f0"
 GRID_EDGE_COLOR = "#888"
@@ -167,62 +161,91 @@ def format_team(team):
     return name.replace("Team ", "T")
 
 
-def cell_kind(teams):
-    kinds = {kind for _, kind in teams}
-    if len(kinds) == 1:
-        return next(iter(kinds))
-    return MIXED
+def _break_rows_for_round(round_row):
+    playing = {team for game_teams in round_row for team in game_teams}
+    idle = [team for team in TEAMS if team not in playing]
+    return [idle[i:i + TEAMS_PER_GAME] for i in range(0, len(idle), TEAMS_PER_GAME)]
 
 
 def render_schedule(rounds, output_path="schema.png"):
     import matplotlib.pyplot as plt
 
+    num_cols = 1 + TEAMS_PER_GAME
     num_games = len(GAMES)
     num_rounds = len(rounds)
 
-    col_labels = [""] + GAMES
-    row_data = []
-    cell_colors = []
-    for i, round_row in enumerate(rounds, 1):
-        row = [f"Round {i}"] + [", ".join(format_team(t) for t in teams) for teams in round_row]
-        colors = [ROW_HEADER_COLOR] + [KIND_COLORS[cell_kind(teams)] for teams in round_row]
-        row_data.append(row)
-        cell_colors.append(colors)
+    blocks = []
+    for round_row in rounds:
+        break_rows = _break_rows_for_round(round_row)
+        blocks.append((round_row, break_rows))
 
-    fig_w = 2 + num_games * 2.2
-    fig_h = 1.2 + num_rounds * 0.6
-    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
-    ax.axis("off")
+    rows_per_block = [1 + num_games + len(br) for _, br in blocks]
+    height_ratios = rows_per_block
 
-    table = ax.table(
-        cellText=row_data,
-        colLabels=col_labels,
-        cellColours=cell_colors,
-        colColours=[LABEL_COLOR] * (num_games + 1),
-        cellLoc="center",
-        loc="center",
+    fig_w = 20
+    fig_h = sum(rows_per_block) * 0.45 + num_rounds * 0.3
+    fig, axes = plt.subplots(
+        num_rounds, 1,
+        figsize=(fig_w, fig_h),
+        gridspec_kw={"height_ratios": height_ratios},
     )
-    table.auto_set_font_size(False)
-    table.set_fontsize(11)
-    table.scale(1, 1.8)
+    if num_rounds == 1:
+        axes = [axes]
 
-    for (r, c), cell in table.get_celld().items():
-        cell.set_edgecolor(GRID_EDGE_COLOR)
-        if r == 0 or c == 0:
-            cell.set_text_props(weight="bold")
+    for ax, (round_idx, (round_row, break_rows)) in zip(axes, enumerate(blocks, 1)):
+        ax.axis("off")
 
-    fig.tight_layout()
+        cell_text = []
+        cell_colors = []
+
+        header_row = [f"Round {round_idx}"] + [""] * (num_cols - 1)
+        cell_text.append(header_row)
+        cell_colors.append([LABEL_COLOR] * num_cols)
+
+        for game_name, teams in zip(GAMES, round_row):
+            cell_text.append([game_name] + [format_team(t) for t in teams])
+            cell_colors.append([ROW_HEADER_COLOR] + ["white"] * (num_cols - 1))
+
+        for break_idx, chunk in enumerate(break_rows):
+            label = "Pauze" if break_idx == 0 else ""
+            padded = [format_team(t) for t in chunk] + [""] * (TEAMS_PER_GAME - len(chunk))
+            cell_text.append([label] + padded)
+            cell_colors.append([ROW_HEADER_COLOR] + ["white"] * (num_cols - 1))
+
+        table = ax.table(
+            cellText=cell_text,
+            cellColours=cell_colors,
+            cellLoc="center",
+            loc="center",
+        )
+        table.auto_set_font_size(False)
+        table.set_fontsize(11)
+        table.scale(1, 1.6)
+
+        for (r, c), cell in table.get_celld().items():
+            cell.set_edgecolor(GRID_EDGE_COLOR)
+            if r == 0 or c == 0:
+                cell.set_text_props(weight="bold")
+
+    fig.subplots_adjust(hspace=0.4)
     fig.savefig(output_path, dpi=200, bbox_inches="tight")
     plt.close(fig)
     return output_path
 
 
 def write_csv(rounds, output_path="schema.csv"):
+    num_cols = 1 + TEAMS_PER_GAME
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow([""] + GAMES)
-        for i, round_row in enumerate(rounds, 1):
-            writer.writerow([f"Round {i}"] + [", ".join(format_team(t) for t in teams) for teams in round_row])
+        for round_idx, round_row in enumerate(rounds, 1):
+            writer.writerow([f"Round {round_idx}"] + [""] * (num_cols - 1))
+            for game_name, teams in zip(GAMES, round_row):
+                writer.writerow([game_name] + [format_team(t) for t in teams])
+            for break_idx, chunk in enumerate(_break_rows_for_round(round_row)):
+                label = "Break" if break_idx == 0 else ""
+                padded = [format_team(t) for t in chunk] + [""] * (TEAMS_PER_GAME - len(chunk))
+                writer.writerow([label] + padded)
+            writer.writerow([""] * num_cols)
     return output_path
 
 
